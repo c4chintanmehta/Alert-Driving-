@@ -2,172 +2,510 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Driver Drowsiness Alert System</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Driver Alert Dashboard</title>
+    <!-- MediaPipe Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
-    <!-- Optional: MQTT.js for ESP32 hardware integration -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+    
     <style>
-        body { font-family: system-ui, sans-serif; background: #111; color: #fff; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 20px; transition: background 0.3s; }
-        body.alert { background: #500; } /* Flashes red when drowsy */
-        .container { position: relative; width: 640px; height: 480px; margin-top: 20px; }
-        video, canvas { border-radius: 8px; border: 2px solid #333; position: absolute; top: 0; left: 0; transform: scaleX(-1); }
-        .dashboard { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; width: 640px; margin-top: 20px; }
-        .panel { background: #1e1e1e; padding: 20px; border-radius: 8px; border: 1px solid #333; text-align: center; }
-        .status { font-size: 2rem; font-weight: bold; color: #00ffcc; }
-        .status.danger { color: #ff3333; animation: blink 0.5s infinite; }
-        .metric { font-size: 1.5rem; font-family: monospace; color: #aaa; margin-top: 10px; }
-        button { padding: 10px 20px; font-size: 1.2rem; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; margin-bottom: 10px; }
-        
-        @keyframes blink { 50% { opacity: 0.5; } }
+        :root {
+            --bg-color: #111111;
+            --surface-color: #1E1E1E;
+            --surface-border: #333333;
+            --primary-blue: #007BFF;
+            --neon-cyan: #00FFCC;
+            --danger-red: #FF3333;
+            --warning-amber: #FFB703;
+            --metric-gray: #AAAAAA;
+            --text-light: #FFFFFF;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: system-ui, -apple-system, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-light);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 16px;
+            min-height: 100dvh;
+            overflow-x: hidden;
+            transition: background-color 0.2s;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 640px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            padding-bottom: 30px;
+        }
+
+        .header { text-align: center; margin-bottom: 8px; }
+        .header h1 { font-size: 22px; margin: 0; font-weight: 700; }
+        .header p { color: var(--metric-gray); font-size: 13px; margin-top: 4px; }
+
+        .btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+            background-color: var(--primary-blue);
+            color: var(--text-light);
+            transition: opacity 0.2s, transform 0.1s;
+        }
+        .btn:active { transform: scale(0.98); }
+        .btn-danger { background-color: #D32F2F; }
+        .btn-tonal { background-color: #2C2C2C; color: var(--warning-amber); }
+
+        .camera-container {
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            background-color: #000;
+            border: 2px solid var(--surface-border);
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        video { display: none; }
+        canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        .camera-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: var(--metric-gray);
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .panel-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .panel {
+            background-color: var(--surface-color);
+            border: 1px solid var(--surface-border);
+            border-radius: 8px;
+            padding: 16px 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+
+        .panel-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-light);
+            margin-bottom: 8px;
+        }
+
+        .status-text {
+            color: var(--neon-cyan);
+            font-size: 22px;
+            font-weight: bold;
+        }
+
+        .ear-value {
+            color: var(--metric-gray);
+            font-size: 24px;
+            font-family: monospace;
+            font-weight: 500;
+        }
+
+        .sub-text {
+            font-size: 11px;
+            color: var(--metric-gray);
+            margin-top: 6px;
+            font-family: monospace;
+        }
+
+        /* Dashboard Gauge */
+        .gauge-container {
+            width: 100%;
+            background-color: #2A2A2A;
+            height: 8px;
+            border-radius: 4px;
+            margin-top: 12px;
+            overflow: hidden;
+        }
+
+        .gauge-bar {
+            height: 100%;
+            width: 0%;
+            background-color: var(--metric-gray);
+            transition: width 0.1s, background-color 0.2s;
+        }
+
+        /* Sliders */
+        .settings-card {
+            background-color: var(--surface-color);
+            border: 1px solid var(--surface-border);
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .setting-row {
+            margin-bottom: 16px;
+        }
+        .setting-row:last-child { margin-bottom: 0; }
+
+        .setting-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            color: var(--metric-gray);
+            margin-bottom: 8px;
+        }
+
+        input[type=range] {
+            width: 100%;
+            accent-color: var(--neon-cyan);
+        }
+
+        .alert-bg {
+            background-color: var(--danger-red) !important;
+            animation: blink 0.4s infinite alternate;
+        }
+        .alert-text { color: var(--danger-red) !important; }
+
+        @keyframes blink {
+            from { background-color: #550000; }
+            to { background-color: #111111; }
+        }
+
+        @media (max-width: 400px) {
+            .panel-grid { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
-<body>
+<body id="body">
 
-    <h2>Drowsiness Detection Dashboard</h2>
-    <!-- Browsers require user interaction before playing audio -->
-    <button id="startBtn">Start System (Enable Audio & Camera)</button>
-
-    <div class="container">
-        <video id="input_video" width="640" height="480" autoplay playsinline></video>
-        <canvas id="output_canvas" width="640" height="480"></canvas>
+<div class="container">
+    <div class="header">
+        <h1>Driver Alert Dashboard</h1>
+        <p>Real-time Drowsiness Detection</p>
     </div>
 
-    <div class="dashboard">
-        <div class="panel">
-            <h3>Driver Status</h3>
-            <div id="driverStatus" class="status">AWAKE</div>
-        </div>
-        <div class="panel">
-            <h3>Eye Aspect Ratio (EAR)</h3>
-            <div id="earValue" class="metric">0.00</div>
+    <button class="btn" id="startBtn" onclick="toggleSystem()">Start System (Enable Camera)</button>
+
+    <div class="camera-container">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas"></canvas>
+        <div class="camera-overlay" id="camOverlay">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom:8px;"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg><br>
+            Camera Inactive
         </div>
     </div>
 
-    <script>
-        const videoElement = document.getElementById('input_video');
-        const canvasElement = document.getElementById('output_canvas');
-        const canvasCtx = canvasElement.getContext('2d');
-        const statusElement = document.getElementById('driverStatus');
-        const earElement = document.getElementById('earValue');
+    <!-- Main Telemetry Dashboard -->
+    <div class="panel-grid">
+        <div class="panel">
+            <div class="panel-title">Driver Status</div>
+            <div class="status-text" id="statusText">STANDBY</div>
+            <div class="sub-text" id="framesText" style="color: var(--warning-amber);">System Offline</div>
+        </div>
         
-        // --- Tuning Parameters ---
-        const EAR_THRESHOLD = 0.22; // Adjust based on camera angle
-        const DROWSY_FRAMES_LIMIT = 20; // At 30fps, ~0.6 seconds of closed eyes
-        let closedFramesCount = 0;
-        let isAlarmActive = false;
+        <div class="panel">
+            <div class="panel-title">Eye Aspect Ratio (EAR)</div>
+            <div class="ear-value" id="earValue">0.000</div>
+            <div class="sub-text" id="eyesBreakdown">L: 0.00 | R: 0.00</div>
+        </div>
+    </div>
 
-        // --- Audio Setup (Browser Buzzer) ---
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        let oscillator = null;
+    <!-- EAR Gauge -->
+    <div class="panel">
+        <div style="display: flex; justify-content: space-between; width: 100%;">
+            <span style="font-size: 12px; color: var(--metric-gray)">EAR Gauge</span>
+            <span style="font-size: 12px; font-weight: bold;" id="gaugeLabel">Seeking Face</span>
+        </div>
+        <div class="gauge-container">
+            <div class="gauge-bar" id="gaugeBar"></div>
+        </div>
+    </div>
 
-        function playBuzzer() {
-            if (isAlarmActive) return;
-            isAlarmActive = true;
-            document.body.classList.add('alert');
-            statusElement.innerText = "DROWSY ALARM!";
-            statusElement.classList.add('danger');
-            
-            // Generate an annoying beep
-            oscillator = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            oscillator.type = 'square';
-            oscillator.frequency.setValueAtTime(800, audioCtx.currentTime); // 800Hz beep
-            oscillator.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            oscillator.start();
+    <!-- Dashboard Controls -->
+    <div style="display: flex; gap: 12px;">
+        <button class="btn btn-tonal" id="testBtn" onclick="testAlarm()">Test Alarm</button>
+    </div>
 
-            // Hardware Trigger (e.g., via MQTT to ESP32)
-            // if(mqttClient) mqttClient.publish('vehicle/driver/alert', 'ON');
+    <!-- Tuning Parameters -->
+    <div class="settings-card">
+        <div class="panel-title" style="text-align: left; margin-bottom: 16px;">Tuning Parameters</div>
+        
+        <div class="setting-row">
+            <div class="setting-label">
+                <span>EAR Threshold</span>
+                <span id="thresholdVal">0.22</span>
+            </div>
+            <input type="range" id="thresholdSlider" min="0.15" max="0.35" step="0.01" value="0.22" oninput="updateSettings()">
+        </div>
+
+        <div class="setting-row">
+            <div class="setting-label">
+                <span>Drowsy Frames Limit</span>
+                <span id="framesVal">20 frames</span>
+            </div>
+            <input type="range" id="framesSlider" min="5" max="50" step="1" value="20" oninput="updateSettings()">
+        </div>
+    </div>
+</div>
+
+<script>
+    let isSystemActive = false;
+    let isAlarmActive = false;
+    let closedFramesCount = 0;
+    
+    // Configurable variables matching Android app defaults
+    let EAR_THRESHOLD = 0.22;
+    let DROWSY_FRAMES_LIMIT = 20;
+    
+    // UI Elements
+    const videoElement = document.getElementById('video');
+    const canvasElement = document.getElementById('canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const startBtn = document.getElementById('startBtn');
+    const statusText = document.getElementById('statusText');
+    const earValue = document.getElementById('earValue');
+    const eyesBreakdown = document.getElementById('eyesBreakdown');
+    const body = document.getElementById('body');
+    const framesText = document.getElementById('framesText');
+    const camOverlay = document.getElementById('camOverlay');
+    const gaugeBar = document.getElementById('gaugeBar');
+    const gaugeLabel = document.getElementById('gaugeLabel');
+
+    // Audio context
+    let audioCtx, oscillator, gainNode;
+
+    function initAudio() {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+
+    function playAlarm() {
+        if (oscillator) return; 
+        isAlarmActive = true;
+        oscillator = audioCtx.createOscillator();
+        gainNode = audioCtx.createGain();
+        oscillator.type = 'square';
+        oscillator.frequency.value = 800; 
+        
+        gainNode.gain.setValueAtTime(1, audioCtx.currentTime);
+        setInterval(() => {
+            if(!oscillator) return;
+            const time = audioCtx.currentTime;
+            gainNode.gain.setValueAtTime(0, time + 0.25);
+            gainNode.gain.setValueAtTime(1, time + 0.30);
+        }, 300);
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        oscillator.start();
+    }
+
+    function stopAlarm() {
+        isAlarmActive = false;
+        if (oscillator) {
+            oscillator.stop();
+            oscillator.disconnect();
+            oscillator = null;
         }
+    }
 
-        function stopBuzzer() {
-            if (!isAlarmActive) return;
-            isAlarmActive = false;
-            document.body.classList.remove('alert');
-            statusElement.innerText = "AWAKE";
-            statusElement.classList.remove('danger');
-            
-            if (oscillator) {
-                oscillator.stop();
-                oscillator.disconnect();
-            }
-            
-            // Hardware Trigger OFF
-            // if(mqttClient) mqttClient.publish('vehicle/driver/alert', 'OFF');
+    function testAlarm() {
+        initAudio();
+        const testBtn = document.getElementById('testBtn');
+        if (isAlarmActive) {
+            stopAlarm();
+            testBtn.innerText = "Test Alarm";
+            testBtn.classList.remove('btn-danger');
+            body.classList.remove('alert-bg');
+            if(!isSystemActive) statusText.innerText = "STANDBY";
+        } else {
+            playAlarm();
+            testBtn.innerText = "Stop Alarm";
+            testBtn.classList.add('btn-danger');
+            body.classList.add('alert-bg');
+            statusText.innerText = "TEST ALARM!";
         }
+    }
 
-        // --- Calculate 3D distance between two points ---
-        function calculateDistance(p1, p2) {
-            return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2) + Math.pow(p1.z - p2.z, 2));
-        }
+    function updateSettings() {
+        EAR_THRESHOLD = parseFloat(document.getElementById('thresholdSlider').value);
+        DROWSY_FRAMES_LIMIT = parseInt(document.getElementById('framesSlider').value);
+        document.getElementById('thresholdVal').innerText = EAR_THRESHOLD.toFixed(2);
+        document.getElementById('framesVal').innerText = `${DROWSY_FRAMES_LIMIT} frames`;
+    }
 
-        function calculateEAR(landmarks, indices) {
-            // indices: [p1, p2, p3, p4, p5, p6]
-            // p1, p4 are horizontal. p2, p6 and p3, p5 are vertical.
-            const p1 = landmarks[indices[0]], p2 = landmarks[indices[1]], p3 = landmarks[indices[2]];
-            const p4 = landmarks[indices[3]], p5 = landmarks[indices[4]], p6 = landmarks[indices[5]];
+    function dist(p1, p2) {
+        return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+    }
+
+    // MediaPipe Initialization
+    const faceMesh = new FaceMesh({locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+    }});
+    
+    faceMesh.setOptions({
+        maxNumFaces: 1,
+        refineLandmarks: true,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+    });
+
+    faceMesh.onResults((results) => {
+        if (!isSystemActive) return;
+
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+        if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+            camOverlay.style.display = 'none';
+            const landmarks = results.multiFaceLandmarks[0];
+
+            // Calculate Left and Right EAR separately
+            const leftH = dist(landmarks[33], landmarks[133]);
+            const leftV = dist(landmarks[159], landmarks[145]);
+            const leftEAR = leftV / leftH;
+
+            const rightH = dist(landmarks[362], landmarks[263]);
+            const rightV = dist(landmarks[386], landmarks[374]);
+            const rightEAR = rightV / rightH;
+
+            const avgEAR = (leftEAR + rightEAR) / 2;
             
-            const v1 = calculateDistance(p2, p6);
-            const v2 = calculateDistance(p3, p5);
-            const h = calculateDistance(p1, p4);
-            
-            return (v1 + v2) / (2.0 * h);
-        }
+            // Update Dashboard Values
+            earValue.innerText = avgEAR.toFixed(3);
+            eyesBreakdown.innerText = `L: ${leftEAR.toFixed(2)} | R: ${rightEAR.toFixed(2)}`;
+            earValue.style.color = (avgEAR < EAR_THRESHOLD) ? "var(--danger-red)" : "var(--metric-gray)";
 
-        const faceMesh = new FaceMesh({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`});
-        faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
-        faceMesh.onResults(onResults);
+            // Update Gauge (Max expected EAR ~ 0.40)
+            let gaugePct = Math.min((avgEAR / 0.40) * 100, 100);
+            gaugeBar.style.width = `${gaugePct}%`;
 
-        function onResults(results) {
-            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-
-            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-                const landmarks = results.multiFaceLandmarks[0];
-
-                // Standard MediaPipe Eye Landmark Indices
-                const leftEyeIndices = [33, 160, 158, 133, 153, 144];
-                const rightEyeIndices = [362, 385, 387, 263, 373, 380];
-
-                const leftEAR = calculateEAR(landmarks, leftEyeIndices);
-                const rightEAR = calculateEAR(landmarks, rightEyeIndices);
-                const avgEAR = (leftEAR + rightEAR) / 2.0;
-
-                earElement.innerText = avgEAR.toFixed(3);
-
-                // Drowsiness State Machine
-                if (avgEAR < EAR_THRESHOLD) {
-                    closedFramesCount++;
-                    if (closedFramesCount >= DROWSY_FRAMES_LIMIT) {
-                        playBuzzer();
-                    }
-                } else {
-                    closedFramesCount = 0;
-                    stopBuzzer();
+            if (avgEAR < EAR_THRESHOLD) {
+                gaugeBar.style.backgroundColor = "var(--danger-red)";
+                gaugeLabel.innerText = `Drowsy (< ${EAR_THRESHOLD})`;
+                gaugeLabel.style.color = "var(--danger-red)";
+                closedFramesCount++;
+                framesText.innerText = `Closed frames: ${closedFramesCount}/${DROWSY_FRAMES_LIMIT}`;
+                
+                if (closedFramesCount >= DROWSY_FRAMES_LIMIT && !isAlarmActive) {
+                    statusText.innerText = "DROWSY ALARM!";
+                    statusText.classList.add('alert-text');
+                    body.classList.add('alert-bg');
+                    playAlarm();
                 }
+            } else {
+                gaugeBar.style.backgroundColor = "var(--neon-cyan)";
+                gaugeLabel.innerText = `Awake (>= ${EAR_THRESHOLD})`;
+                gaugeLabel.style.color = "var(--neon-cyan)";
+                closedFramesCount = 0;
+                framesText.innerText = "";
+                
+                if (!document.getElementById('testBtn').classList.contains('btn-danger')) {
+                    statusText.innerText = "AWAKE";
+                    statusText.classList.remove('alert-text');
+                    body.classList.remove('alert-bg');
+                    stopAlarm();
+                }
+            }
 
-                // Draw Eye Contours
-                canvasCtx.fillStyle = (avgEAR < EAR_THRESHOLD) ? "red" : "lime";
-                [...leftEyeIndices, ...rightEyeIndices].forEach(index => {
-                    const pt = landmarks[index];
-                    canvasCtx.beginPath();
-                    canvasCtx.arc(pt.x * canvasElement.width, pt.y * canvasElement.height, 2, 0, 2 * Math.PI);
-                    canvasCtx.fill();
-                });
+            // Draw HUD landmarks
+            canvasCtx.fillStyle = (closedFramesCount >= DROWSY_FRAMES_LIMIT) ? "#FF3333" : "#00FFCC";
+            [33, 133, 159, 145, 362, 263, 386, 374].forEach(index => {
+                const pt = landmarks[index];
+                canvasCtx.beginPath();
+                canvasCtx.arc(pt.x * canvasElement.width, pt.y * canvasElement.height, 3, 0, 2 * Math.PI);
+                canvasCtx.fill();
+            });
+
+        } else {
+            // No face tracked
+            statusText.innerText = "NO FACE DETECTED";
+            earValue.innerText = "---";
+            eyesBreakdown.innerText = "Seeking Face...";
+            gaugeBar.style.width = "0%";
+            gaugeLabel.innerText = "Seeking Face";
+            gaugeLabel.style.color = "var(--warning-amber)";
+            closedFramesCount = 0;
+            if (!document.getElementById('testBtn').classList.contains('btn-danger')) {
+                stopAlarm();
             }
         }
+        canvasCtx.restore();
+    });
 
-        document.getElementById('startBtn').addEventListener('click', () => {
-            audioCtx.resume(); // Required to unlock Web Audio API
-            const camera = new Camera(videoElement, {
-                onFrame: async () => { await faceMesh.send({image: videoElement}); },
-                width: 640, height: 480
-            });
+    const camera = new Camera(videoElement, {
+        onFrame: async () => {
+            if(isSystemActive) {
+                if(canvasElement.width !== videoElement.videoWidth) {
+                    canvasElement.width = videoElement.videoWidth;
+                    canvasElement.height = videoElement.videoHeight;
+                }
+                await faceMesh.send({image: videoElement});
+            }
+        },
+        facingMode: 'user', // Request mobile front camera
+        width: 640,
+        height: 480
+    });
+
+    function toggleSystem() {
+        initAudio();
+        isSystemActive = !isSystemActive;
+        
+        if (isSystemActive) {
+            startBtn.innerText = 'Stop Monitoring';
+            startBtn.classList.add('btn-danger');
+            camOverlay.innerHTML = "Initializing...<br><span style='font-size:11px'>Loading MediaPipe</span>";
             camera.start();
-            document.getElementById('startBtn').style.display = 'none';
-        });
-    </script>
+        } else {
+            startBtn.innerText = 'Start System (Enable Camera)';
+            startBtn.classList.remove('btn-danger');
+            camera.stop();
+            if (!document.getElementById('testBtn').classList.contains('btn-danger')) stopAlarm();
+            
+            statusText.innerText = 'STANDBY';
+            statusText.classList.remove('alert-text');
+            body.classList.remove('alert-bg');
+            framesText.innerText = "System Offline";
+            earValue.innerText = '0.000';
+            earValue.style.color = 'var(--metric-gray)';
+            eyesBreakdown.innerText = "L: 0.00 | R: 0.00";
+            gaugeBar.style.width = "0%";
+            gaugeLabel.innerText = "Seeking Face";
+            gaugeLabel.style.color = "var(--metric-gray)";
+            
+            camOverlay.style.display = 'block';
+            camOverlay.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom:8px;"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg><br>Camera Inactive`;
+            
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        }
+    }
+</script>
+
 </body>
 </html>
